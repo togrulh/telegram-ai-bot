@@ -7,7 +7,14 @@ import asyncio
 
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    MessageHandler,
+    CallbackQueryHandler,
+    ContextTypes,
+    filters
+)
 import yt_dlp
 
 # ----------------- TOKEN -----------------
@@ -20,7 +27,6 @@ user_language = {}
 users_file = Path("users.json")
 executor = ThreadPoolExecutor(max_workers=2)
 
-# Load users
 if users_file.exists():
     with open(users_file, "r") as f:
         users = json.load(f)
@@ -160,14 +166,48 @@ async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     msg_lines = [f"{u.get('first_name','N/A')} (@{u.get('username','N/A')}) — Downloads: {u.get('downloads',0)}" for u in users.values()]
     await update.message.reply_text("\n".join(msg_lines))
 
+# ----------------- SEARCH -----------------
+async def search_and_show_results(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat.id
+    lang = user_language.get(chat_id, "en")
+    query = update.message.text
+    await update.message.reply_text(MESSAGES["searching"][lang])
+
+    ydl_opts = {'quiet': True, 'skip_download': True, 'default_search': 'ytsearch5'}
+    try:
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            results = ydl.extract_info(query, download=False)['entries']
+    except Exception:
+        await update.message.reply_text(MESSAGES["no_results"][lang])
+        return
+
+    if not results:
+        await update.message.reply_text(MESSAGES["no_results"][lang])
+        return
+
+    buttons = [
+        [InlineKeyboardButton(f"{i+1}. {r['title'][:50]}", callback_data=f"dl_{r['webpage_url']}_mp3")]
+        for i, r in enumerate(results)
+    ]
+    await update.message.reply_text("Select:", reply_markup=InlineKeyboardMarkup(buttons))
+
+async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    query = update.callback_query
+    await query.answer()
+    chat_id = query.message.chat.id
+    _, url, selected_format = query.data.split("_", 2, 1)  # split only first two underscores
+    await query.message.reply_text(MESSAGES["downloading"]["en"].format(format=selected_format))
+    ThreadPoolExecutor().submit(download_video, chat_id, context, url, selected_format)
+
 # ----------------- RUN BOT -----------------
 if __name__ == "__main__":
-    keep_alive()  # Flask server
+    keep_alive()
     app_bot = ApplicationBuilder().token(TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("stats", stats))
     app_bot.add_handler(CommandHandler("users", users_list))
     app_bot.add_handler(CallbackQueryHandler(set_language, pattern=r"^lang_"))
+    app_bot.add_handler(CallbackQueryHandler(download_callback, pattern=r"^dl_"))
+    app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_and_show_results))
 
-    # Synchronous run_polling
     app_bot.run_polling()
