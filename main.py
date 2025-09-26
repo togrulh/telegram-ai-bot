@@ -94,11 +94,13 @@ def progress_hook_factory(chat_id, context, last_percent=[0]):
 
 # ----------------- DOWNLOAD -----------------
 def download_video(chat_id, context, url, selected_format="mp3"):
+    cookies_path = "/home/web/cookies.txt"  # Render-də cookies faylı
     ydl_opts = {}
     if selected_format == "mp3":
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': f"{chat_id}_%(title)s.%(ext)s",
+            'cookiefile': cookies_path,
             'postprocessors': [{'key': 'FFmpegExtractAudio', 'preferredcodec': 'mp3', 'preferredquality': '128'}],
             'quiet': True,
             'noplaylist': True,
@@ -110,6 +112,7 @@ def download_video(chat_id, context, url, selected_format="mp3"):
         ydl_opts = {
             'format': 'best',
             'outtmpl': f"{chat_id}_%(title)s.%(ext)s",
+            'cookiefile': cookies_path,
             'progress_hooks': [progress_hook_factory(chat_id, context)]
         }
 
@@ -195,7 +198,7 @@ async def download_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
     chat_id = query.message.chat.id
-    _, url, selected_format = query.data.split("_", 2, 1)  # split only first two underscores
+    _, url, selected_format = query.data.split("_", 2)
     await query.message.reply_text(MESSAGES["downloading"]["en"].format(format=selected_format))
     ThreadPoolExecutor().submit(download_video, chat_id, context, url, selected_format)
 
@@ -209,5 +212,4 @@ if __name__ == "__main__":
     app_bot.add_handler(CallbackQueryHandler(set_language, pattern=r"^lang_"))
     app_bot.add_handler(CallbackQueryHandler(download_callback, pattern=r"^dl_"))
     app_bot.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, search_and_show_results))
-
     app_bot.run_polling()
