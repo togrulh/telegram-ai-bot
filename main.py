@@ -165,14 +165,17 @@ async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(msg_lines))
 
 # ----------------- RUN BOT -----------------
-async def main():
+if __name__ == "__main__":
+    keep_alive()  # Flask server
     app_bot = ApplicationBuilder().token(TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("stats", stats))
     app_bot.add_handler(CommandHandler("users", users_list))
     app_bot.add_handler(CallbackQueryHandler(set_language, pattern=r"^lang_"))
 
-    await app_bot.run_polling()
+    # ✅ Synchronous run_polling avoids loop closing issues
+    app_bot.run_polling()
+
 
 if __name__ == "__main__":
     keep_alive()
