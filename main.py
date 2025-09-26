@@ -15,7 +15,6 @@ import yt_dlp
 
 # ----------------- TOKEN -----------------
 TOKEN = os.environ.get("TOKEN")  # Railway Environment Variable
-
 if not TOKEN:
     raise ValueError("⚠️ TOKEN environment variable not set!")
 
@@ -54,7 +53,6 @@ MESSAGES = {
 
 # ----------------- FLASK SERVER -----------------
 app = Flask('')
-
 @app.route('/')
 def home():
     return "Bot is running!"
@@ -160,11 +158,28 @@ async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     total_downloads = sum(user["downloads"] for user in users.values())
     await update.message.reply_text(MESSAGES["stats"][lang].format(users=total_users, downloads=total_downloads))
 
+# ----------------- USERS COMMAND -----------------
+async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    chat_id = update.message.chat.id
+    if not users:
+        await update.message.reply_text("⚠️ No users found.")
+        return
+
+    msg_lines = []
+    for u in users.values():
+        uname = u.get("username") or "N/A"
+        fname = u.get("first_name") or "N/A"
+        downloads = u.get("downloads", 0)
+        msg_lines.append(f"{fname} (@{uname}) — Downloads: {downloads}")
+
+    await update.message.reply_text("\n".join(msg_lines))
+
 # ----------------- RUN BOT -----------------
 def run_bot():
     app_bot = ApplicationBuilder().token(TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("stats", stats))
+    app_bot.add_handler(CommandHandler("users", users_list))
     app_bot.run_polling()
 
 if __name__ == "__main__":
