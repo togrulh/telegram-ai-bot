@@ -175,9 +175,3 @@ if __name__ == "__main__":
 
     # Synchronous run_polling, async loop problemi çıxmır
     app_bot.run_polling()
-
-
-
-if __name__ == "__main__":
-    keep_alive()
-    asyncio.run(main())
