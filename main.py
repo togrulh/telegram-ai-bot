@@ -5,29 +5,30 @@ from pathlib import Path
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
 
-import nest_asyncio
-nest_asyncio.apply()
-
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder,
+    CommandHandler,
+    ContextTypes,
+    CallbackQueryHandler,
+)
 import yt_dlp
 
 # ----------------- TOKEN -----------------
-TOKEN = os.environ.get("TOKEN")  # Railway Environment Variable
+TOKEN = os.environ.get("TOKEN")
 if not TOKEN:
     raise ValueError("⚠️ TOKEN environment variable not set!")
 
 # ----------------- GLOBALS -----------------
-user_selection = {}
-pagination_data = {}
+user_language = {}
+users_file = Path("users.json")
 VIDEOS_PER_PAGE = 10
 executor = ThreadPoolExecutor(max_workers=2)
-user_language = {}
 
-USERS_FILE = Path("users.json")
-if USERS_FILE.exists():
-    with open(USERS_FILE, "r") as f:
+# Load users
+if users_file.exists():
+    with open(users_file, "r") as f:
         users = json.load(f)
 else:
     users = {}
@@ -52,21 +53,19 @@ MESSAGES = {
 }
 
 # ----------------- FLASK SERVER -----------------
-app = Flask('')
+app = Flask(__name__)
+
 @app.route('/')
 def home():
     return "Bot is running!"
 
-def run():
-    app.run(host='0.0.0.0', port=8080)
-
 def keep_alive():
-    t = Thread(target=run)
-    t.start()
+    port = int(os.environ.get("PORT", 8080))
+    Thread(target=lambda: app.run(host="0.0.0.0", port=port)).start()
 
-# ----------------- USER STATS -----------------
+# ----------------- USERS -----------------
 def save_users():
-    with open(USERS_FILE, "w") as f:
+    with open(users_file, "w") as f:
         json.dump(users, f, indent=4)
 
 def add_user(chat_id, username, first_name):
@@ -94,7 +93,7 @@ def progress_hook_factory(chat_id, context, last_percent=[0]):
     return hook
 
 # ----------------- DOWNLOAD -----------------
-async def download_video_async(url, chat_id, context, selected_format):
+async def download_video_async(url, chat_id, context, selected_format="mp3"):
     loop = asyncio.get_event_loop()
     ydl_opts = {}
 
@@ -116,10 +115,9 @@ async def download_video_async(url, chat_id, context, selected_format):
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             info = ydl.extract_info(url, download=True)
             if selected_format == "mp3":
-                file_name = Path(f"{chat_id}_{info['title']}.mp3")
+                return Path(f"{chat_id}_{info['title']}.mp3")
             else:
-                file_name = Path(ydl.prepare_filename(info))
-        return file_name
+                return Path(ydl.prepare_filename(info))
 
     file_name = await loop.run_in_executor(executor, ytdlp_download)
 
@@ -129,7 +127,8 @@ async def download_video_async(url, chat_id, context, selected_format):
         else:
             await context.bot.send_video(chat_id=chat_id, video=f)
 
-    Path(file_name).unlink()
+    file_name.unlink()
+    increment_download(chat_id)
 
 # ----------------- BOT HANDLERS -----------------
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -139,49 +138,42 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         [InlineKeyboardButton("🇬🇧 English", callback_data="lang_en")],
         [InlineKeyboardButton("🇷🇺 Русский", callback_data="lang_ru")]
     ]
-    await update.message.reply_text("Choose your language / Dil seçin / Выберите язык:", reply_markup=InlineKeyboardMarkup(buttons))
+    await update.message.reply_text(MESSAGES["choose_lang"]["en"], reply_markup=InlineKeyboardMarkup(buttons))
 
 async def set_language(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
+    await query.answer()
     chat_id = query.message.chat.id
     lang = query.data.split("_")[1]
     user_language[chat_id] = lang
-    await query.answer()
-    first_name = query.from_user.first_name
-    add_user(chat_id, query.from_user.username, first_name)
-    await query.message.reply_text(MESSAGES["start"][lang].format(first_name=first_name))
+    add_user(chat_id, query.from_user.username, query.from_user.first_name)
+    await query.message.reply_text(MESSAGES["start"][lang].format(first_name=query.from_user.first_name))
 
 async def stats(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     lang = user_language.get(chat_id, "en")
     total_users = len(users)
-    total_downloads = sum(user["downloads"] for user in users.values())
+    total_downloads = sum(u["downloads"] for u in users.values())
     await update.message.reply_text(MESSAGES["stats"][lang].format(users=total_users, downloads=total_downloads))
 
-# ----------------- USERS COMMAND -----------------
 async def users_list(update: Update, context: ContextTypes.DEFAULT_TYPE):
     chat_id = update.message.chat.id
     if not users:
         await update.message.reply_text("⚠️ No users found.")
         return
-
-    msg_lines = []
-    for u in users.values():
-        uname = u.get("username") or "N/A"
-        fname = u.get("first_name") or "N/A"
-        downloads = u.get("downloads", 0)
-        msg_lines.append(f"{fname} (@{uname}) — Downloads: {downloads}")
-
+    msg_lines = [f"{u.get('first_name','N/A')} (@{u.get('username','N/A')}) — Downloads: {u.get('downloads',0)}" for u in users.values()]
     await update.message.reply_text("\n".join(msg_lines))
 
 # ----------------- RUN BOT -----------------
-def run_bot():
+async def main():
     app_bot = ApplicationBuilder().token(TOKEN).build()
     app_bot.add_handler(CommandHandler("start", start))
     app_bot.add_handler(CommandHandler("stats", stats))
     app_bot.add_handler(CommandHandler("users", users_list))
-    app_bot.run_polling()
+    app_bot.add_handler(CallbackQueryHandler(set_language, pattern=r"^lang_"))
+
+    await app_bot.run_polling()
 
 if __name__ == "__main__":
     keep_alive()
-    run_bot()
+    asyncio.run(main())
