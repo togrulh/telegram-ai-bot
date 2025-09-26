@@ -1,18 +1,13 @@
 import os
 import json
-import asyncio
 from pathlib import Path
 from threading import Thread
 from concurrent.futures import ThreadPoolExecutor
+import asyncio
 
 from flask import Flask
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import (
-    ApplicationBuilder,
-    CommandHandler,
-    ContextTypes,
-    CallbackQueryHandler,
-)
+from telegram.ext import ApplicationBuilder, CommandHandler, CallbackQueryHandler, ContextTypes
 import yt_dlp
 
 # ----------------- TOKEN -----------------
@@ -23,7 +18,6 @@ if not TOKEN:
 # ----------------- GLOBALS -----------------
 user_language = {}
 users_file = Path("users.json")
-VIDEOS_PER_PAGE = 10
 executor = ThreadPoolExecutor(max_workers=2)
 
 # Load users
@@ -93,7 +87,7 @@ def progress_hook_factory(chat_id, context, last_percent=[0]):
     return hook
 
 # ----------------- DOWNLOAD -----------------
- def download_video(chat_id, context, url, selected_format="mp3"):
+def download_video(chat_id, context, url, selected_format="mp3"):
     ydl_opts = {}
     if selected_format == "mp3":
         ydl_opts = {
@@ -104,9 +98,14 @@ def progress_hook_factory(chat_id, context, last_percent=[0]):
             'noplaylist': True,
             'socket_timeout': 1200,
             'retries': 10,
+            'progress_hooks': [progress_hook_factory(chat_id, context)]
         }
     else:
-        ydl_opts = {'format': 'best', 'outtmpl': f"{chat_id}_%(title)s.%(ext)s"}
+        ydl_opts = {
+            'format': 'best',
+            'outtmpl': f"{chat_id}_%(title)s.%(ext)s",
+            'progress_hooks': [progress_hook_factory(chat_id, context)]
+        }
 
     def ytdlp_download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -116,10 +115,8 @@ def progress_hook_factory(chat_id, context, last_percent=[0]):
             else:
                 return Path(ydl.prepare_filename(info))
 
-    # ThreadPoolExecutor ilə sync işləri async çağırış kimi işlət
     file_path = ThreadPoolExecutor().submit(ytdlp_download).result()
 
-    # Faylı bot ilə göndər
     with open(file_path, "rb") as f:
         if selected_format == "mp3":
             context.bot.send_audio(chat_id=chat_id, audio=f)
@@ -127,7 +124,6 @@ def progress_hook_factory(chat_id, context, last_percent=[0]):
             context.bot.send_video(chat_id=chat_id, video=f)
 
     file_path.unlink()
-
     increment_download(chat_id)
 
 # ----------------- BOT HANDLERS -----------------
@@ -173,5 +169,5 @@ if __name__ == "__main__":
     app_bot.add_handler(CommandHandler("users", users_list))
     app_bot.add_handler(CallbackQueryHandler(set_language, pattern=r"^lang_"))
 
-    # Synchronous run_polling, async loop problemi çıxmır
+    # Synchronous run_polling
     app_bot.run_polling()
