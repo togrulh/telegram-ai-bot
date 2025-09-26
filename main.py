@@ -93,10 +93,8 @@ def progress_hook_factory(chat_id, context, last_percent=[0]):
     return hook
 
 # ----------------- DOWNLOAD -----------------
-async def download_video_async(url, chat_id, context, selected_format="mp3"):
-    loop = asyncio.get_event_loop()
+ def download_video(chat_id, context, url, selected_format="mp3"):
     ydl_opts = {}
-
     if selected_format == "mp3":
         ydl_opts = {
             'format': 'bestaudio/best',
@@ -106,10 +104,9 @@ async def download_video_async(url, chat_id, context, selected_format="mp3"):
             'noplaylist': True,
             'socket_timeout': 1200,
             'retries': 10,
-            'progress_hooks': [progress_hook_factory(chat_id, context)]
         }
     else:
-        ydl_opts = {'format': 'best', 'outtmpl': f"{chat_id}_%(title)s.%(ext)s", 'progress_hooks': [progress_hook_factory(chat_id, context)]}
+        ydl_opts = {'format': 'best', 'outtmpl': f"{chat_id}_%(title)s.%(ext)s"}
 
     def ytdlp_download():
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
@@ -119,15 +116,18 @@ async def download_video_async(url, chat_id, context, selected_format="mp3"):
             else:
                 return Path(ydl.prepare_filename(info))
 
-    file_name = await loop.run_in_executor(executor, ytdlp_download)
+    # ThreadPoolExecutor ilə sync işləri async çağırış kimi işlət
+    file_path = ThreadPoolExecutor().submit(ytdlp_download).result()
 
-    with open(file_name, "rb") as f:
+    # Faylı bot ilə göndər
+    with open(file_path, "rb") as f:
         if selected_format == "mp3":
-            await context.bot.send_audio(chat_id=chat_id, audio=f)
+            context.bot.send_audio(chat_id=chat_id, audio=f)
         else:
-            await context.bot.send_video(chat_id=chat_id, video=f)
+            context.bot.send_video(chat_id=chat_id, video=f)
 
-    file_name.unlink()
+    file_path.unlink()
+
     increment_download(chat_id)
 
 # ----------------- BOT HANDLERS -----------------
@@ -173,8 +173,9 @@ if __name__ == "__main__":
     app_bot.add_handler(CommandHandler("users", users_list))
     app_bot.add_handler(CallbackQueryHandler(set_language, pattern=r"^lang_"))
 
-    # ✅ Synchronous run_polling avoids loop closing issues
+    # Synchronous run_polling, async loop problemi çıxmır
     app_bot.run_polling()
+
 
 
 if __name__ == "__main__":
