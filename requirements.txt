@@ -1,5 +1,4 @@
-python-telegram-bot==20.5
-yt_dlp
+python-telegram-bot==20.3
+yt-dlp
 flask
-nest_asyncio
-ffmpeg-python
+nest-asyncio
